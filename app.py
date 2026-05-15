@@ -286,3 +286,67 @@ def scrape():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
+
+
+# ── ENVÍO DE CORREOS ─────────────────────────────────────────────────────────
+from email_sender import enviar_correo
+import json as _json
+
+@app.route('/enviar', methods=['POST'])
+def enviar():
+    """
+    Recibe lista de correos y los envía uno a uno.
+    Body JSON: { "correos": [ { "email", "nombre", "asunto", "cuerpo" } ] }
+    """
+    data = request.get_json()
+    if not data or 'correos' not in data:
+        return jsonify({'error': 'Formato incorrecto. Envía { "correos": [...] }'}), 400
+
+    correos = data['correos']
+    if not correos:
+        return jsonify({'error': 'La lista de correos está vacía'}), 400
+
+    if len(correos) > 30:
+        return jsonify({'error': 'Máximo 30 correos por tanda'}), 400
+
+    resultados = []
+    for c in correos:
+        email   = c.get('email','').strip()
+        nombre  = c.get('nombre','').strip()
+        asunto  = c.get('asunto','').strip()
+        cuerpo  = c.get('cuerpo','').strip()
+
+        if not email or not asunto or not cuerpo:
+            resultados.append({'email': email, 'ok': False, 'error': 'Datos incompletos'})
+            continue
+
+        ok, error = enviar_correo(email, nombre, asunto, cuerpo)
+        resultados.append({'email': email, 'nombre': nombre, 'ok': ok, 'error': error})
+
+        # Pausa entre envíos para evitar spam
+        import time
+        time.sleep(1.5)
+
+    enviados = sum(1 for r in resultados if r['ok'])
+    fallidos = sum(1 for r in resultados if not r['ok'])
+
+    return jsonify({
+        'total': len(correos),
+        'enviados': enviados,
+        'fallidos': fallidos,
+        'resultados': resultados
+    })
+
+@app.route('/test-email', methods=['GET'])
+def test_email():
+    """Endpoint de prueba — envía un correo de test al remitente."""
+    ok, error = enviar_correo(
+        'tamara.prieto@ata.es',
+        'Tamara',
+        'Test OAP Gestor — Correo de prueba',
+        'Este es un correo de prueba del Gestor OAP A Coruña.\n\nSi lo recibes, el sistema de envío funciona correctamente.'
+    )
+    if ok:
+        return jsonify({'status': 'ok', 'message': 'Correo de prueba enviado a tamara.prieto@ata.es'})
+    else:
+        return jsonify({'status': 'error', 'message': error}), 500
