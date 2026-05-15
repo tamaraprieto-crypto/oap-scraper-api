@@ -350,3 +350,29 @@ def test_email():
         return jsonify({'status': 'ok', 'message': 'Correo de prueba enviado a tamara.prieto@ata.es'})
     else:
         return jsonify({'status': 'error', 'message': error}), 500
+
+@app.route('/scrape-uso', methods=['GET'])
+def scrape_uso():
+    """Consulta el uso restante del plan de Scrape.do."""
+    try:
+        r = requests.get(
+            f'http://api.scrape.do/stats?token={SCRAPE_DO_TOKEN}',
+            timeout=10
+        )
+        if r.status_code == 200:
+            data = r.json()
+            return jsonify({
+                'status': 'ok',
+                'usados': data.get('usedRequests', 0),
+                'limite': data.get('concurrencyLimit', 0),
+                'restantes': data.get('remainingRequests', 0),
+                'plan': data.get('planName', 'Gratuito'),
+                'reset': data.get('resetDate', '')
+            })
+        else:
+            return jsonify({'status': 'error', 'message': f'Scrape.do respondió {r.status_code}'}), 400
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=False)
