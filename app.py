@@ -25,6 +25,26 @@ DOMINIOS_IGNORAR = {
 SLUGS = ['/contacto','/contacta','/contact','/sobre-nosotros','/info']
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36'}
 
+# Mapa de categorías conocidas con sus URLs directas
+CATEGORIAS = {
+    "restaurantes":       "restaurantes-a-coru%C3%B1a-461ep_31ay.html",
+    "peluquerías":        "peluquerias-a-coru%C3%B1a-405ep_31ay.html",
+    "peluquerias":        "peluquerias-a-coru%C3%B1a-405ep_31ay.html",
+    "clínicas dentales":  "clinicas-dentales-dentistas-a-coru%C3%B1a-131ep_31ay.html",
+    "clinicas dentales":  "clinicas-dentales-dentistas-a-coru%C3%B1a-131ep_31ay.html",
+    "farmacias":          "farmacias-de-guardia-farmacias-a-coru%C3%B1a-211ep_31ay.html",
+    "talleres mecánicos": "coches-talleres-mecanicos-a-coru%C3%B1a-68ep_31ay.html",
+    "talleres mecanicos": "coches-talleres-mecanicos-a-coru%C3%B1a-68ep_31ay.html",
+    "academias idiomas":  "academias-de-idiomas-a-coru%C3%B1a-7ep_31ay.html",
+    "fontanería":         "fontaneria-a-coru%C3%B1a-219ep_31ay.html",
+    "fontaneria":         "fontaneria-a-coru%C3%B1a-219ep_31ay.html",
+    "electricistas":      "instalaciones-electricas-electricidad-electricistas-a-coru%C3%B1a-185ep_31ay.html",
+    "veterinarios":       "veterinarios-y-clinicas-veterinarias-a-coru%C3%B1a-503ep_31ay.html",
+    "centros estética":   "salones-de-belleza-y-centros-de-estetica-a-coru%C3%B1a-7001ep_31ay.html",
+    "centros estetica":   "salones-de-belleza-y-centros-de-estetica-a-coru%C3%B1a-7001ep_31ay.html",
+    "tiendas de ropa":    "tiendas-de-ropa-a-coru%C3%B1a-86ep_31ay.html",
+}
+
 @dataclass
 class Negocio:
     nombre: str
@@ -107,108 +127,125 @@ def buscar_email_en_web(url_web):
             if emails: return emails[0], base + slug
     return '', ''
 
-def buscar_url_en_paxinas(termino, localidad='a-coruña'):
-    """
-    Busca el término en Páxinas Galegas y devuelve la URL correcta
-    para ese epígrafe + ayuntamiento.
-    Primero busca en la home para encontrar el enlace al epígrafe,
-    luego construye la URL con el código de ayuntamiento.
-    """
-    # Códigos de ayuntamiento más comunes
-    AYUNTAMIENTOS = {
-        'a coruña': '31ay', 'coruña': '31ay',
-        'ferrol': '29ay', 'santiago': '41ay', 'santiago de compostela': '41ay',
-        'betanzos': '7ay', 'carballo': '16ay', 'narón': '52ay',
-        'oleiros': '57ay', 'arteixo': '4ay', 'cambre': '14ay',
-        'culleredo': '24ay', 'sada': '68ay',
-    }
-    cod_ay = AYUNTAMIENTOS.get(localidad.lower(), '31ay')
-
-    # Buscar el epígrafe en Páxinas Galegas
-    termino_norm = termino.lower().strip()
-    search_url = f"{BASE}/"
-    soup = get_via_scrapedo(search_url)
-    if not soup:
-        return None, None
-
-    # Buscar enlaces que contengan el término
-    mejor_link = None
-    mejor_score = 0
-    for a in soup.find_all('a', href=True):
-        href = a['href']
-        texto = a.get_text(strip=True).lower()
-        if not href.endswith('.html'): continue
-        if 'galicia' not in href: continue
-        # Calcular coincidencia
-        palabras = termino_norm.split()
-        score = sum(1 for p in palabras if p in href.lower() or p in texto)
-        if score > mejor_score:
-            mejor_score = score
-            mejor_link = href
-
-    if not mejor_link or mejor_score == 0:
-        # Intentar construir URL directamente con el término normalizado
-        termino_url = termino_norm.replace(' ', '-').replace('á','a').replace('é','e').replace('í','i').replace('ó','o').replace('ú','u').replace('ñ','n')
-        return None, termino_url
-
-    # Extraer código del epígrafe de la URL (ej: restaurantes-galicia-461ep.html → 461ep)
-    match = re.search(r'-(\d+ep)\.html', mejor_link)
-    if not match:
-        return None, None
-
-    cod_ep = match.group(1)
-    # Extraer prefijo del nombre
-    prefijo = mejor_link.split('/')[-1].replace(f'-galicia-{cod_ep}.html', '')
-
-    # Construir URL para A Coruña
-    url_acoruna = f"{BASE}/{prefijo}-a-coru%C3%B1a-{cod_ep}_{cod_ay}.html"
-    return url_acoruna, prefijo
-
-def scrape_libre_stream(termino, localidad, max_pag, buscar_emails_web):
-    """Scraper de búsqueda libre por término en Páxinas Galegas."""
+def extraer_negocios_de_soup(soup, sector):
+    """Extrae negocios de una página de Páxinas Galegas."""
     negocios = []
+    # Método 1: atributos data-* (páginas de epígrafe)
+    items = soup.find_all('li', attrs={'data-empid': True})
+    for li in items:
+        nombre   = li.get('data-name','').strip()
+        telefono = li.get('data-telf','').strip()
+        email    = limpiar_email(li.get('data-mail','')) or ''
+        web      = li.get('data-empuri','').strip()
+        if not nombre: continue
+        if web and any(s in web for s in ['instagram.com','facebook.com','twitter.com']): web = ''
+        negocios.append(Negocio(nombre=nombre, sector=sector, telefono=telefono,
+                                web=web, email=email,
+                                estado='con_email' if email else ('con_web' if web else 'sin_web')))
+    if negocios:
+        return negocios
 
-    yield json.dumps({'tipo': 'estado', 'msg': f'Buscando "{termino}" en Páxinas Galegas...'}) + '\n'
+    # Método 2: resultados de búsqueda libre (/resultados.aspx)
+    for item in soup.select('[data-empid], .resultado, .empresa, [class*=empresa]'):
+        nombre_el = item.select_one('[itemprop=name], h2, h3, .nombre')
+        if not nombre_el: continue
+        nombre = nombre_el.get_text(strip=True)
+        if not nombre: continue
+        tel_el = item.select_one('[itemprop=telephone], [class*=tel], [class*=phone]')
+        telefono = tel_el.get_text(strip=True) if tel_el else ''
+        web = ''
+        for a in item.find_all('a', href=True):
+            if a['href'].startswith('http') and 'paxinasgalegas' not in a['href']:
+                if not any(s in a['href'] for s in ['facebook','instagram','twitter']):
+                    web = a['href']; break
+        negocios.append(Negocio(nombre=nombre, sector=sector, telefono=telefono,
+                                web=web, estado='con_web' if web else 'sin_web'))
 
-    url_acoruna, prefijo = buscar_url_en_paxinas(termino, localidad)
+    return negocios
 
-    if not url_acoruna:
-        # Intentar URL directa construida desde el término
-        termino_url = termino.lower().strip()
-        for ch, rep in [(' ','-'),('á','a'),('é','e'),('í','i'),('ó','o'),('ú','u'),('ñ','n'),('ü','u')]:
-            termino_url = termino_url.replace(ch, rep)
-        url_acoruna = f"{BASE}/{termino_url}-a-coru%C3%B1a-_31ay.html"
+def scrape_stream(termino, localidad, max_pag, buscar_emails_web):
+    """Scraper principal con soporte para categorías conocidas y búsqueda libre."""
+    negocios = []
+    termino_lower = termino.lower().strip()
 
-    yield json.dumps({'tipo': 'estado', 'msg': f'Accediendo a resultados...'}) + '\n'
+    # Decidir qué tipo de búsqueda usar
+    url_categoria = CATEGORIAS.get(termino_lower)
 
-    for pag in range(max_pag):
-        url = url_acoruna if pag == 0 else f"{url_acoruna}?pagina={pag}"
-        log.info(f'[{termino}] Pág {pag+1}: {url}')
-        soup = get_via_scrapedo(url)
-        if not soup:
-            yield json.dumps({'tipo': 'aviso', 'msg': f'Sin resultados en página {pag+1}'}) + '\n'
-            break
+    if url_categoria:
+        # Búsqueda por epígrafe (más precisa)
+        yield json.dumps({'tipo': 'estado', 'msg': f'Usando categoría directa de Páxinas Galegas...'}) + '\n'
+        for pag in range(max_pag):
+            url = f'{BASE}/{url_categoria}' if pag == 0 else f'{BASE}/{url_categoria}?pagina={pag}'
+            log.info(f'[Epígrafe] {termino} pág {pag+1}')
+            soup = get_via_scrapedo(url)
+            if not soup: break
+            encontrados = extraer_negocios_de_soup(soup, termino)
+            if not encontrados: break
+            for n in encontrados:
+                negocios.append(n)
+                yield json.dumps({'tipo': 'negocio', 'data': asdict(n)}) + '\n'
+            pausa(1.5, 3)
+    else:
+        # Búsqueda libre por texto (resultados.aspx)
+        yield json.dumps({'tipo': 'estado', 'msg': f'Buscando "{termino}" en Páxinas Galegas...'}) + '\n'
 
-        items = soup.find_all('li', attrs={'data-empid': True})
-        if not items:
-            if pag == 0:
-                yield json.dumps({'tipo': 'error', 'msg': f'No se encontraron negocios para "{termino}". Prueba con otro término.'}) + '\n'
-            break
+        # Normalizar localidad para la búsqueda
+        localidad_busqueda = localidad.lower().replace('ñ','n').replace('á','a').replace('é','e').replace('í','i').replace('ó','o').replace('ú','u')
+        texto_busqueda = f"{termino} {localidad_busqueda}"
 
-        for li in items:
-            nombre   = li.get('data-name','').strip()
-            telefono = li.get('data-telf','').strip()
-            email    = limpiar_email(li.get('data-mail','')) or ''
-            web      = li.get('data-empuri','').strip()
-            if not nombre: continue
-            if web and any(s in web for s in ['instagram.com','facebook.com','twitter.com']): web = ''
-            n = Negocio(nombre=nombre, sector=termino, localidad=localidad,
-                        telefono=telefono, web=web, email=email,
-                        estado='con_email' if email else ('con_web' if web else 'sin_web'))
-            negocios.append(n)
-            yield json.dumps({'tipo': 'negocio', 'data': asdict(n)}) + '\n'
-        pausa(1.5, 3)
+        for pag in range(max_pag):
+            inicio = pag * 20
+            url = f'{BASE}/resultados.aspx?tipo=0&texto={quote_plus(texto_busqueda)}&inicio={inicio}'
+            log.info(f'[Libre] {texto_busqueda} pág {pag+1}: {url}')
+            soup = get_via_scrapedo(url)
+            if not soup:
+                yield json.dumps({'tipo': 'aviso', 'msg': 'Sin respuesta de Páxinas Galegas'}) + '\n'
+                break
 
+            # Buscar fichas de empresa en resultados
+            items = soup.find_all('li', attrs={'data-empid': True})
+            if not items:
+                # Intentar otros selectores de resultados
+                items_alt = soup.select('.resultado-empresa, [class*=result], article')
+                if not items_alt:
+                    if pag == 0:
+                        yield json.dumps({'tipo': 'aviso', 'msg': f'No se encontraron resultados para "{termino}". Prueba con otro término.'}) + '\n'
+                    break
+                for item in items_alt:
+                    nombre_el = item.select_one('h2, h3, .nombre, [itemprop=name]')
+                    if not nombre_el: continue
+                    nombre = nombre_el.get_text(strip=True)
+                    if not nombre: continue
+                    tel_el = item.select_one('[itemprop=telephone],[class*=tel]')
+                    telefono = tel_el.get_text(strip=True) if tel_el else ''
+                    web = ''
+                    for a in item.find_all('a', href=True):
+                        if a['href'].startswith('http') and 'paxinasgalegas' not in a['href']:
+                            if not any(s in a['href'] for s in ['facebook','instagram','twitter']):
+                                web = a['href']; break
+                    n = Negocio(nombre=nombre, sector=termino, localidad=localidad,
+                                telefono=telefono, web=web,
+                                estado='con_web' if web else 'sin_web')
+                    negocios.append(n)
+                    yield json.dumps({'tipo': 'negocio', 'data': asdict(n)}) + '\n'
+            else:
+                for li in items:
+                    nombre   = li.get('data-name','').strip()
+                    telefono = li.get('data-telf','').strip()
+                    email    = limpiar_email(li.get('data-mail','')) or ''
+                    web      = li.get('data-empuri','').strip()
+                    if not nombre: continue
+                    if web and any(s in web for s in ['instagram.com','facebook.com','twitter.com']): web = ''
+                    n = Negocio(nombre=nombre, sector=termino, localidad=localidad,
+                                telefono=telefono, web=web, email=email,
+                                estado='con_email' if email else ('con_web' if web else 'sin_web'))
+                    negocios.append(n)
+                    yield json.dumps({'tipo': 'negocio', 'data': asdict(n)}) + '\n'
+
+            if len(items) < 10: break  # Última página
+            pausa(1.5, 3)
+
+    # Buscar emails en webs
     if buscar_emails_web:
         sin_email = [n for n in negocios if n.web and not n.email]
         total = len(sin_email)
@@ -232,9 +269,9 @@ def health():
 
 @app.route('/scrape')
 def scrape():
-    termino  = request.args.get('termino', '') or request.args.get('sector', '')
+    termino   = request.args.get('termino', '') or request.args.get('sector', '')
     localidad = request.args.get('localidad', 'A Coruña')
-    max_pag  = min(int(request.args.get('paginas', 3)), 10)
+    max_pag   = min(int(request.args.get('paginas', 3)), 10)
     buscar_emails = request.args.get('emails', 'true').lower() == 'true'
 
     if not termino:
@@ -242,7 +279,7 @@ def scrape():
 
     def generate():
         yield json.dumps({'tipo': 'inicio', 'termino': termino, 'localidad': localidad, 'paginas': max_pag}) + '\n'
-        yield from scrape_libre_stream(termino, localidad, max_pag, buscar_emails)
+        yield from scrape_stream(termino, localidad, max_pag, buscar_emails)
 
     return Response(generate(), mimetype='application/x-ndjson',
                     headers={'X-Accel-Buffering': 'no', 'Cache-Control': 'no-cache'})
