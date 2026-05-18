@@ -320,7 +320,7 @@ def enviar():
             resultados.append({'email': email, 'ok': False, 'error': 'Datos incompletos'})
             continue
 
-        ok, error = enviar_correo(email, nombre, asunto, cuerpo)
+        ok, error = enviar_correo(email, nombre, asunto, cuerpo, c.get('firma_html',''))
         resultados.append({'email': email, 'nombre': nombre, 'ok': ok, 'error': error})
 
         # Pausa entre envíos para evitar spam
